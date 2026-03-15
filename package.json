@@ -1,0 +1,56 @@
+{
+  "name": "@tmmac/corepass-auth",
+  "version": "1.0.0",
+  "description": "Reusable CorePass authentication middleware for Express.js — QR + Mobile Deep Link",
+  "main": "dist/cjs/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs && npm run build:widget",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:widget": "node esbuild.widget.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsc -p tsconfig.esm.json --watch"
+  },
+  "dependencies": {
+    "blockchain-wallet-validator": "^1.2.1"
+  },
+  "peerDependencies": {
+    "express": "^4.0.0 || ^5.0.0"
+  },
+  "optionalDependencies": {
+    "@noble/curves": "^2.0.1",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/qrcode": "^1.5.5",
+    "esbuild": "^0.24.0",
+    "express": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "keywords": [
+    "corepass",
+    "core-blockchain",
+    "authentication",
+    "qr-login",
+    "express-middleware",
+    "ican"
+  ],
+  "license": "MIT",
+  "author": "TMMAC"
+}
