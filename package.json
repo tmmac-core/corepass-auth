@@ -22,7 +22,8 @@
     "build:widget": "node esbuild.widget.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev": "tsc -p tsconfig.esm.json --watch"
+    "dev": "tsc -p tsconfig.esm.json --watch",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "blockchain-wallet-validator": "^1.2.1"
