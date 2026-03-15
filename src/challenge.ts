@@ -8,9 +8,13 @@ export async function createChallenge(config: ResolvedConfig): Promise<Challenge
   const appLinkUrl = `${config.baseUrl}/auth/app-link`;
 
   // Desktop (QR): type=callback — CorePass POSTs to server
+  // QR is scanned optically, no OS URI handling → encodeURIComponent is safe
   const loginUri = `corepass:login?sess=${id}&conn=${encodeURIComponent(callbackUrl)}&type=callback`;
   // Mobile (Deep Link): type=app-link — CorePass redirects via GET
-  const mobileUri = `corepass:login?sess=${id}&conn=${encodeURIComponent(appLinkUrl)}&type=app-link`;
+  // NO encodeURIComponent! Mobile OS re-encodes custom scheme URIs.
+  // If we pre-encode, the OS double-encodes (%3A → %253A) → CorePass can't parse it.
+  // Unencoded: OS encodes once → CorePass decodes once → correct URL.
+  const mobileUri = `corepass:login?sess=${id}&conn=${appLinkUrl}&type=app-link`;
 
   const challenge: ChallengeData = {
     id,

@@ -229,7 +229,8 @@ export function createRouter(config: ResolvedConfig): Router {
     }
 
     const appLinkUrl = `${config.baseUrl}/auth/app-link`;
-    const corepassUri = `corepass:login?sess=${challengeId}&conn=${encodeURIComponent(appLinkUrl)}&type=app-link`;
+    // NO encodeURIComponent — mobile OS re-encodes custom scheme URIs
+    const corepassUri = `corepass:login?sess=${challengeId}&conn=${appLinkUrl}&type=app-link`;
 
     const html = getMobileRedirectHtml(corepassUri);
     res.set('Content-Type', 'text/html; charset=utf-8');
