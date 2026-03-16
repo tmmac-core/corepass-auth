@@ -228,9 +228,8 @@ export function createRouter(config: ResolvedConfig): Router {
       return res.status(404).send('Challenge not found or expired');
     }
 
-    // App-link conn points to app root — CorePass redirects back with query params
-    const appLinkReturnUrl = `${config.baseUrl}/`;
-    const corepassUri = `corepass:login/?sess=${encodeURIComponent(challengeId)}&conn=${encodeURIComponent(appLinkReturnUrl)}&type=app-link`;
+    const callbackUrl = `${config.baseUrl}/auth/callback`;
+    const corepassUri = `corepass:login/?sess=${encodeURIComponent(challengeId)}&conn=${encodeURIComponent(callbackUrl)}&type=callback`;
 
     const html = getMobileRedirectHtml(corepassUri);
     res.set('Content-Type', 'text/html; charset=utf-8');

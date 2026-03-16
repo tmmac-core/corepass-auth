@@ -75,7 +75,7 @@ describe('Router Endpoints', () => {
       expect(res.status).toBe(200);
       expect(res.body.challengeId).toBeDefined();
       expect(res.body.loginUri).toContain('corepass:login');
-      expect(res.body.mobileUri).toContain('type=app-link');
+      expect(res.body.mobileUri).toContain('type=callback');
       expect(res.body.expiresIn).toBe(300);
     });
   });

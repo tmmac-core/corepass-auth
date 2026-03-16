@@ -5,16 +5,14 @@ import type { ChallengeData, ChallengeResponse, ResolvedConfig, StoreEntry } fro
 export async function createChallenge(config: ResolvedConfig): Promise<ChallengeResponse> {
   const id = crypto.randomBytes(16).toString('hex');
   const callbackUrl = `${config.baseUrl}/auth/callback`;
-  // App-link conn points to the app root — CorePass redirects back with query params,
-  // the frontend picks them up and relays to the callback endpoint (client-side relay).
-  // Based on: github.com/acetra19/CorePass-Authenticator-Widget PR #1
-  const appLinkReturnUrl = `${config.baseUrl}/`;
 
   // Note: URI path is "login/" (trailing slash) — CorePass requires this format.
   // Desktop (QR): type=callback — CorePass POSTs to server
   const loginUri = `corepass:login/?sess=${encodeURIComponent(id)}&conn=${encodeURIComponent(callbackUrl)}&type=callback`;
-  // Mobile (Deep Link): type=app-link — CorePass redirects user back to appLinkReturnUrl
-  const mobileUri = `corepass:login/?sess=${encodeURIComponent(id)}&conn=${encodeURIComponent(appLinkReturnUrl)}&type=app-link`;
+  // Mobile (Deep Link): also type=callback — CorePass POSTs to server, no redirect.
+  // Using type=callback avoids CorePass opening its internal browser (type=app-link issue).
+  // Safari keeps polling in the background → detects auth → user switches back → logged in.
+  const mobileUri = `corepass:login/?sess=${encodeURIComponent(id)}&conn=${encodeURIComponent(callbackUrl)}&type=callback`;
 
   const challenge: ChallengeData = {
     id,
