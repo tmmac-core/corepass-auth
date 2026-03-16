@@ -29,7 +29,7 @@ describe('Challenge', () => {
 
     expect(result.challengeId).toBeDefined();
     expect(result.challengeId).toHaveLength(32); // 16 bytes hex
-    expect(result.loginUri).toContain('corepass:login?sess=');
+    expect(result.loginUri).toContain('corepass:login/?sess=');
     expect(result.loginUri).toContain('type=callback');
     expect(result.mobileUri).toContain('type=app-link');
     expect(result.expiresIn).toBe(300); // 5 min
@@ -51,7 +51,9 @@ describe('Challenge', () => {
     const result = await createChallenge(cfg);
 
     expect(result.loginUri).toContain(encodeURIComponent('https://my-app.com/auth/callback'));
-    expect(result.mobileUri).toContain(encodeURIComponent('https://my-app.com/auth/app-link'));
+    // Mobile app-link conn points to root URL (client-side relay pattern)
+    expect(result.mobileUri).toContain(encodeURIComponent('https://my-app.com/'));
+    expect(result.mobileUri).toContain('type=app-link');
   });
 
   it('should update a challenge', async () => {

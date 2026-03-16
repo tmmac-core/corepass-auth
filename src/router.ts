@@ -228,9 +228,9 @@ export function createRouter(config: ResolvedConfig): Router {
       return res.status(404).send('Challenge not found or expired');
     }
 
-    const appLinkUrl = `${config.baseUrl}/auth/app-link`;
-    // NO encodeURIComponent — mobile OS re-encodes custom scheme URIs
-    const corepassUri = `corepass:login?sess=${challengeId}&conn=${appLinkUrl}&type=app-link`;
+    // App-link conn points to app root — CorePass redirects back with query params
+    const appLinkReturnUrl = `${config.baseUrl}/`;
+    const corepassUri = `corepass:login/?sess=${encodeURIComponent(challengeId)}&conn=${encodeURIComponent(appLinkReturnUrl)}&type=app-link`;
 
     const html = getMobileRedirectHtml(corepassUri);
     res.set('Content-Type', 'text/html; charset=utf-8');
