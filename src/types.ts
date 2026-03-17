@@ -43,6 +43,12 @@ export interface CorePassAuthConfig {
 
   /** Passkey/KYC data verification endpoint (opt-in) */
   passkey?: PasskeyConfig;
+
+  /** Structured audit logger for login events (IP, user-agent, result) */
+  auditLogger?: AuditLogger;
+
+  /** Hook called before marking a session as authenticated — throw to reject */
+  onBeforeAuthenticate?: (payload: CallbackPayload, challenge: ChallengeData) => Promise<void>;
 }
 
 // ===== Session Store =====
@@ -78,6 +84,8 @@ export interface ChallengeResponse {
   challengeId: string;
   loginUri: string;
   mobileUri: string;
+  /** Deep link URI with type=app-link — CorePass redirects to conn URL with query params */
+  appLinkUri: string;
   qrDataUrl?: string;
   expiresIn: number;
 }
@@ -111,6 +119,36 @@ export interface PasskeyResult {
   credentialId: string;
   timestamp: string;
   userData: Record<string, unknown> | null;
+}
+
+// ===== Audit Logger =====
+
+export interface AuditEvent {
+  /** Event type */
+  type: 'login_success' | 'login_failure' | 'login_rejected';
+  /** CorePass ICAN or 'unknown' */
+  userId: string;
+  /** Client IP (from X-Forwarded-For or X-Real-IP) */
+  ip: string;
+  /** Client User-Agent */
+  userAgent: string;
+  /** When the event occurred */
+  timestamp: Date;
+  /** Reason for failure/rejection */
+  reason?: string;
+}
+
+export interface AuditLogger {
+  log(event: AuditEvent): Promise<void>;
+}
+
+// ===== Callback Payload =====
+
+/** Normalized callback payload from CorePass (used by onBeforeAuthenticate hook) */
+export interface CallbackPayload {
+  sessionId: string;
+  coreId: string;
+  signature?: string;
 }
 
 // ===== Auth Result =====
@@ -148,4 +186,6 @@ export interface ResolvedConfig {
   store: SessionStore;
   onAuthenticated?: (session: SessionData) => void | Promise<void>;
   passkey: ResolvedPasskeyConfig;
+  auditLogger?: AuditLogger;
+  onBeforeAuthenticate?: (payload: CallbackPayload, challenge: ChallengeData) => Promise<void>;
 }

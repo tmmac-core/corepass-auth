@@ -32,6 +32,8 @@ describe('Challenge', () => {
     expect(result.loginUri).toContain('corepass:login/?sess=');
     expect(result.loginUri).toContain('type=callback');
     expect(result.mobileUri).toContain('type=callback');
+    expect(result.appLinkUri).toContain('corepass:login/?sess=');
+    expect(result.appLinkUri).toContain('type=app-link');
     expect(result.expiresIn).toBe(300); // 5 min
     expect(result.qrDataUrl).toBeUndefined(); // generateQr = false
   });
@@ -54,6 +56,9 @@ describe('Challenge', () => {
     // Mobile app-link conn points to root URL (client-side relay pattern)
     expect(result.mobileUri).toContain(encodeURIComponent('https://my-app.com/'));
     expect(result.mobileUri).toContain('type=callback');
+    // appLinkUri uses /auth/app-link endpoint with type=app-link
+    expect(result.appLinkUri).toContain(encodeURIComponent('https://my-app.com/auth/app-link'));
+    expect(result.appLinkUri).toContain('type=app-link');
   });
 
   it('should update a challenge', async () => {

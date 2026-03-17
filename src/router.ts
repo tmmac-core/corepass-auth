@@ -1,11 +1,33 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import type { ResolvedConfig, ChallengeData, PasskeyData } from './types.js';
+import type { ResolvedConfig, ChallengeData, PasskeyData, CallbackPayload } from './types.js';
 import { createChallenge, getChallenge, updateChallenge, deleteChallenge } from './challenge.js';
 import { createSession } from './session.js';
 import { normalizeIcan, isIcanAllowed, getIcanName } from './crypto/ican.js';
 import { verifyEd448Signature } from './crypto/ed448.js';
 import { getMobileRedirectHtml } from './widget/mobile.js';
+
+/**
+ * Normalize CorePass callback field names.
+ * Why: CorePass sends coreID (capital D), but integrators might send coreId.
+ * Same for session vs sessionId. This prevents support issues from field name mismatches.
+ */
+function normalizePayload(body: Record<string, unknown>): CallbackPayload {
+  return {
+    sessionId: String(body?.session || body?.sessionId || ''),
+    coreId: String(body?.coreID || body?.coreId || ''),
+    signature: body?.signature ? String(body.signature) : undefined,
+  };
+}
+
+/** Extract client IP from request headers (for audit logging) */
+function getClientIp(headers: Record<string, string | string[] | undefined>): string {
+  const forwarded = headers['x-forwarded-for'];
+  if (typeof forwarded === 'string') return forwarded.split(',')[0].trim();
+  const realIp = headers['x-real-ip'];
+  if (typeof realIp === 'string') return realIp;
+  return '';
+}
 
 /** Build the widget JS bundle (loaded lazily) */
 let widgetBundle: string | null = null;
@@ -40,7 +62,7 @@ export function createRouter(config: ResolvedConfig): Router {
 
   // ===== POST /callback — CorePass app callback after QR scan =====
   router.post('/callback', async (req: Request, res: Response) => {
-    const { session: sessionId, coreID, signature } = req.body;
+    const { sessionId, coreId: coreID, signature } = normalizePayload(req.body || {});
 
     if (!sessionId || !coreID) {
       return res.status(400).json({ error: 'Missing session or coreID' });
@@ -56,6 +78,11 @@ export function createRouter(config: ResolvedConfig): Router {
     }
 
     const ican = normalizeIcan(coreID);
+    const auditBase = {
+      ip: getClientIp(req.headers),
+      userAgent: String(req.headers['user-agent'] || ''),
+      timestamp: new Date(),
+    };
 
     // Whitelist check
     if (!isIcanAllowed(ican, config.allowedIcans)) {
@@ -63,6 +90,9 @@ export function createRouter(config: ResolvedConfig): Router {
       challenge.status = 'rejected';
       challenge.reason = 'ICAN not whitelisted';
       await updateChallenge(config, sessionId, challenge);
+      if (config.auditLogger) {
+        await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason: 'ICAN not whitelisted' });
+      }
       return res.status(403).json({ error: 'ICAN nicht autorisiert' });
     }
 
@@ -77,7 +107,27 @@ export function createRouter(config: ResolvedConfig): Router {
         challenge.status = 'rejected';
         challenge.reason = 'Invalid signature';
         await updateChallenge(config, sessionId, challenge);
+        if (config.auditLogger) {
+          await config.auditLogger.log({ ...auditBase, type: 'login_failure', userId: ican, reason: 'Invalid signature' });
+        }
         return res.status(403).json({ error: 'Signatur ungueltig' });
+      }
+    }
+
+    // Optional pre-authentication hook — allows custom validation before accepting
+    if (config.onBeforeAuthenticate) {
+      try {
+        await config.onBeforeAuthenticate({ sessionId, coreId: coreID, signature }, challenge);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : 'Pre-auth hook rejected';
+        console.log(`[CorePassAuth] Pre-auth hook rejected: ${reason}`);
+        challenge.status = 'rejected';
+        challenge.reason = reason;
+        await updateChallenge(config, sessionId, challenge);
+        if (config.auditLogger) {
+          await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason });
+        }
+        return res.status(403).json({ error: reason });
       }
     }
 
@@ -92,14 +142,18 @@ export function createRouter(config: ResolvedConfig): Router {
     await updateChallenge(config, sessionId, challenge);
 
     console.log(`[CorePassAuth] Authenticated: ${name} (${ican})`);
+    if (config.auditLogger) {
+      await config.auditLogger.log({ ...auditBase, type: 'login_success', userId: ican });
+    }
     res.json({ status: 'ok', ican, name });
   });
 
   // ===== GET /app-link — CorePass mobile redirect callback =====
   router.get('/app-link', async (req: Request, res: Response) => {
-    const sessionId = String(req.query.session || '');
-    const coreID = String(req.query.coreID || '');
-    const signature = req.query.signature ? String(req.query.signature) : undefined;
+    // Normalize query param names (session/sessionId, coreID/coreId)
+    const sessionId = String(req.query.session || req.query.sessionId || '');
+    const coreID = String(req.query.coreID || req.query.coreId || '');
+    const signature = (req.query.signature) ? String(req.query.signature) : undefined;
 
     if (!sessionId || !coreID) {
       return res.redirect('/?error=missing_params');
@@ -115,10 +169,18 @@ export function createRouter(config: ResolvedConfig): Router {
     }
 
     const ican = normalizeIcan(coreID);
+    const auditBase = {
+      ip: getClientIp(req.headers),
+      userAgent: String(req.headers['user-agent'] || ''),
+      timestamp: new Date(),
+    };
 
     if (!isIcanAllowed(ican, config.allowedIcans)) {
       console.log(`[CorePassAuth] app-link: ICAN not whitelisted: ${ican}`);
       await deleteChallenge(config, sessionId);
+      if (config.auditLogger) {
+        await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason: 'ICAN not whitelisted (app-link)' });
+      }
       return res.redirect('/?error=not_whitelisted');
     }
 
@@ -130,7 +192,25 @@ export function createRouter(config: ResolvedConfig): Router {
       });
       if (!valid) {
         await deleteChallenge(config, sessionId);
+        if (config.auditLogger) {
+          await config.auditLogger.log({ ...auditBase, type: 'login_failure', userId: ican, reason: 'Invalid signature (app-link)' });
+        }
         return res.redirect('/?error=invalid_signature');
+      }
+    }
+
+    // Optional pre-authentication hook
+    if (config.onBeforeAuthenticate) {
+      try {
+        await config.onBeforeAuthenticate({ sessionId, coreId: coreID, signature }, challenge);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : 'Pre-auth hook rejected';
+        console.log(`[CorePassAuth] app-link: Pre-auth hook rejected: ${reason}`);
+        await deleteChallenge(config, sessionId);
+        if (config.auditLogger) {
+          await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason });
+        }
+        return res.redirect(`/?error=rejected`);
       }
     }
 
@@ -140,6 +220,9 @@ export function createRouter(config: ResolvedConfig): Router {
 
     const name = encodeURIComponent(appSession.name);
     console.log(`[CorePassAuth] app-link: Authenticated: ${appSession.name} (${ican})`);
+    if (config.auditLogger) {
+      await config.auditLogger.log({ ...auditBase, type: 'login_success', userId: ican });
+    }
     res.redirect(`/?token=${appSession.id}&name=${name}`);
   });
 

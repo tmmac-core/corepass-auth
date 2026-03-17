@@ -76,6 +76,7 @@ describe('Router Endpoints', () => {
       expect(res.body.challengeId).toBeDefined();
       expect(res.body.loginUri).toContain('corepass:login');
       expect(res.body.mobileUri).toContain('type=callback');
+      expect(res.body.appLinkUri).toContain('type=app-link');
       expect(res.body.expiresIn).toBe(300);
     });
   });
@@ -117,6 +118,16 @@ describe('Router Endpoints', () => {
         coreID: TEST_ICAN,
       });
       expect(res.status).toBe(404);
+    });
+
+    it('should accept coreId (lowercase d) via payload normalization', async () => {
+      const challenge = await request(app, 'POST', '/auth/challenge');
+      const res = await request(app, 'POST', '/auth/callback', {
+        sessionId: challenge.body.challengeId, // sessionId instead of session
+        coreId: TEST_ICAN, // coreId instead of coreID
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
     });
   });
 
@@ -237,6 +248,104 @@ describe('Router Endpoints', () => {
       expect(res.body.authenticated).toBe(true);
       expect(res.body.ican).toBe(TEST_ICAN);
       expect(res.body.name).toBe('TestUser');
+    });
+  });
+
+  describe('onBeforeAuthenticate hook', () => {
+    it('should reject when hook throws', async () => {
+      const hookApp = createTestApp({
+        onBeforeAuthenticate: async () => {
+          throw new Error('Custom rejection');
+        },
+      });
+
+      const challenge = await request(hookApp.app, 'POST', '/auth/challenge');
+      const res = await request(hookApp.app, 'POST', '/auth/callback', {
+        session: challenge.body.challengeId,
+        coreID: TEST_ICAN,
+      });
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Custom rejection');
+      hookApp.auth.destroy();
+    });
+
+    it('should pass when hook resolves', async () => {
+      const hookApp = createTestApp({
+        onBeforeAuthenticate: async () => {
+          // Allow — do nothing
+        },
+      });
+
+      const challenge = await request(hookApp.app, 'POST', '/auth/challenge');
+      const res = await request(hookApp.app, 'POST', '/auth/callback', {
+        session: challenge.body.challengeId,
+        coreID: TEST_ICAN,
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
+      hookApp.auth.destroy();
+    });
+
+    it('should receive payload and challenge in hook', async () => {
+      let receivedPayload: any;
+      let receivedChallenge: any;
+
+      const hookApp = createTestApp({
+        onBeforeAuthenticate: async (payload, challenge) => {
+          receivedPayload = payload;
+          receivedChallenge = challenge;
+        },
+      });
+
+      const challenge = await request(hookApp.app, 'POST', '/auth/challenge');
+      await request(hookApp.app, 'POST', '/auth/callback', {
+        session: challenge.body.challengeId,
+        coreID: TEST_ICAN,
+      });
+
+      expect(receivedPayload.sessionId).toBe(challenge.body.challengeId);
+      expect(receivedPayload.coreId).toBe(TEST_ICAN);
+      expect(receivedChallenge.status).toBe('pending');
+      hookApp.auth.destroy();
+    });
+  });
+
+  describe('Audit Logger', () => {
+    it('should log successful login', async () => {
+      const events: any[] = [];
+      const loggerApp = createTestApp({
+        auditLogger: { log: async (event) => { events.push(event); } },
+      });
+
+      const challenge = await request(loggerApp.app, 'POST', '/auth/challenge');
+      await request(loggerApp.app, 'POST', '/auth/callback', {
+        session: challenge.body.challengeId,
+        coreID: TEST_ICAN,
+      });
+
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('login_success');
+      expect(events[0].userId).toBe(TEST_ICAN);
+      expect(events[0].timestamp).toBeInstanceOf(Date);
+      loggerApp.auth.destroy();
+    });
+
+    it('should log rejected login (ICAN not whitelisted)', async () => {
+      const events: any[] = [];
+      const loggerApp = createTestApp({
+        auditLogger: { log: async (event) => { events.push(event); } },
+      });
+
+      const challenge = await request(loggerApp.app, 'POST', '/auth/challenge');
+      await request(loggerApp.app, 'POST', '/auth/callback', {
+        session: challenge.body.challengeId,
+        coreID: 'CB0000000000000000000000000000000000000000FF',
+      });
+
+      expect(events).toHaveLength(1);
+      expect(events[0].type).toBe('login_rejected');
+      expect(events[0].reason).toContain('not whitelisted');
+      loggerApp.auth.destroy();
     });
   });
 

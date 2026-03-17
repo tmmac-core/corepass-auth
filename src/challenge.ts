@@ -14,6 +14,12 @@ export async function createChallenge(config: ResolvedConfig): Promise<Challenge
   // Safari keeps polling in the background → detects auth → user switches back → logged in.
   const mobileUri = `corepass:login/?sess=${encodeURIComponent(id)}&conn=${encodeURIComponent(callbackUrl)}&type=callback`;
 
+  // App-link URI: type=app-link — CorePass redirects to conn URL with query params.
+  // Alternative to callback POST. Useful when consumers build their own UI and handle
+  // the redirect themselves. The /auth/app-link endpoint receives ?session=&coreID=&signature=.
+  const appLinkUrl = `${config.baseUrl}/auth/app-link`;
+  const appLinkUri = `corepass:login/?sess=${encodeURIComponent(id)}&conn=${encodeURIComponent(appLinkUrl)}&type=app-link`;
+
   const challenge: ChallengeData = {
     id,
     status: 'pending',
@@ -31,6 +37,7 @@ export async function createChallenge(config: ResolvedConfig): Promise<Challenge
     challengeId: id,
     loginUri,
     mobileUri,
+    appLinkUri,
     expiresIn: Math.floor(config.challengeTtl / 1000),
   };
 
