@@ -1,15 +1,16 @@
 import type { Request, Response, NextFunction } from 'express';
-import type { CorePassAuthConfig, CorePassAuth, ResolvedConfig } from './types.js';
+import type { CorePassAuthConfig, CorePassAuth, ResolvedConfig, ResolvedPasskeyConfig } from './types.js';
 import { MemoryStore } from './stores/memory.js';
 import { createRouter } from './router.js';
 import { getSession, extractToken } from './session.js';
 import { normalizeIcan } from './crypto/ican.js';
 
 // Re-export public types
-export type { CorePassAuthConfig, CorePassAuth, SessionData, SessionStore, StoreEntry } from './types.js';
+export type { CorePassAuthConfig, CorePassAuth, SessionData, SessionStore, StoreEntry, PasskeyConfig, PasskeyData, PasskeyResult } from './types.js';
 export { MemoryStore } from './stores/memory.js';
 export { validateIcan, normalizeIcan, isIcanAllowed } from './crypto/ican.js';
-export { verifyEd448Signature } from './crypto/ed448.js';
+export { verifyEd448Signature, extractPublicKeyFromHeader, canonicalJson } from './crypto/ed448.js';
+export { verifyPasskeyData } from './crypto/passkey.js';
 export { generateQrDataUrl, generateQrSvg } from './qr.js';
 
 /**
@@ -32,6 +33,12 @@ export { generateQrDataUrl, generateQrSvg } from './qr.js';
 export function corepassAuth(userConfig: CorePassAuthConfig): CorePassAuth {
   // Resolve config with defaults
   const store = userConfig.store || new MemoryStore();
+  const passkey: ResolvedPasskeyConfig = {
+    enabled: userConfig.passkey?.enabled ?? false,
+    path: userConfig.passkey?.path ?? '/passkey/data',
+    timestampWindowMs: userConfig.passkey?.timestampWindowMs ?? 10 * 60 * 1000, // 10min
+  };
+
   const config: ResolvedConfig = {
     baseUrl: userConfig.baseUrl.replace(/\/+$/, ''), // Strip trailing slash
     allowedIcans: (userConfig.allowedIcans || []).map(normalizeIcan),
@@ -42,6 +49,7 @@ export function corepassAuth(userConfig: CorePassAuthConfig): CorePassAuth {
     generateQr: userConfig.generateQr ?? false,
     store,
     onAuthenticated: userConfig.onAuthenticated,
+    passkey,
   };
 
   const router = createRouter(config);

@@ -2,6 +2,15 @@ import type { Request, Response, NextFunction, Router } from 'express';
 
 // ===== Config =====
 
+export interface PasskeyConfig {
+  /** Enable the /passkey/data endpoint */
+  enabled: boolean;
+  /** Endpoint path (default: '/passkey/data') */
+  path?: string;
+  /** Allowed timestamp drift in ms (default: 10 minutes) */
+  timestampWindowMs?: number;
+}
+
 export interface CorePassAuthConfig {
   /** Base URL of the app (e.g. https://your-app.com) */
   baseUrl: string;
@@ -31,6 +40,9 @@ export interface CorePassAuthConfig {
 
   /** Enable server-side QR generation (requires qrcode package) */
   generateQr?: boolean;
+
+  /** Passkey/KYC data verification endpoint (opt-in) */
+  passkey?: PasskeyConfig;
 }
 
 // ===== Session Store =====
@@ -80,6 +92,27 @@ export interface SessionData {
   created: number;
 }
 
+// ===== Passkey Data =====
+
+export interface PasskeyData {
+  /** CorePass ICAN (long-form for public key extraction, or short + X-Public-Key header) */
+  coreId: string;
+  /** Credential identifier */
+  credentialId: string;
+  /** Timestamp in microseconds (Unix epoch) */
+  timestamp: string;
+  /** Arbitrary user data payload (KYC fields, etc.) */
+  userData?: Record<string, unknown> | null;
+}
+
+export interface PasskeyResult {
+  ok: true;
+  coreId: string;
+  credentialId: string;
+  timestamp: string;
+  userData: Record<string, unknown> | null;
+}
+
 // ===== Auth Result =====
 
 export interface CorePassAuth {
@@ -98,6 +131,12 @@ export interface CorePassAuth {
 
 // ===== Internal =====
 
+export interface ResolvedPasskeyConfig {
+  enabled: boolean;
+  path: string;
+  timestampWindowMs: number;
+}
+
 export interface ResolvedConfig {
   baseUrl: string;
   allowedIcans: string[];
@@ -108,4 +147,5 @@ export interface ResolvedConfig {
   generateQr: boolean;
   store: SessionStore;
   onAuthenticated?: (session: SessionData) => void | Promise<void>;
+  passkey: ResolvedPasskeyConfig;
 }

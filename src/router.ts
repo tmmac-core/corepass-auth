@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import type { ResolvedConfig, ChallengeData } from './types.js';
+import type { ResolvedConfig, ChallengeData, PasskeyData } from './types.js';
 import { createChallenge, getChallenge, updateChallenge, deleteChallenge } from './challenge.js';
 import { createSession } from './session.js';
 import { normalizeIcan, isIcanAllowed, getIcanName } from './crypto/ican.js';
@@ -214,6 +214,54 @@ export function createRouter(config: ResolvedConfig): Router {
     res.set('Cache-Control', 'public, max-age=3600');
     res.send(bundle);
   });
+
+  // ===== POST /passkey/data — Verify signed CorePass data (opt-in) =====
+  if (config.passkey.enabled) {
+    const passkeyPath = config.passkey.path;
+    router.post(passkeyPath, async (req: Request, res: Response) => {
+      try {
+        const body = req.body as PasskeyData;
+
+        if (!body.coreId || !body.credentialId || !body.timestamp) {
+          return res.status(400).json({
+            ok: false,
+            error: 'missing_fields',
+            details: 'coreId, credentialId and timestamp are required',
+          });
+        }
+
+        const signatureHeader = req.headers['x-signature'];
+        const signature = typeof signatureHeader === 'string' ? signatureHeader : undefined;
+        if (!signature) {
+          return res.status(400).json({
+            ok: false,
+            error: 'missing_signature',
+            details: 'X-Signature header is required',
+          });
+        }
+
+        const { verifyPasskeyData } = await import('./crypto/passkey.js');
+        await verifyPasskeyData(body, signature, req.headers, config.passkey);
+
+        console.log(`[CorePassAuth] Passkey verified: ${body.coreId}`);
+        return res.json({
+          ok: true,
+          coreId: body.coreId,
+          credentialId: body.credentialId,
+          timestamp: body.timestamp,
+          userData: body.userData || null,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.log(`[CorePassAuth] Passkey verification failed: ${message}`);
+        return res.status(400).json({
+          ok: false,
+          error: 'verification_failed',
+          details: message,
+        });
+      }
+    });
+  }
 
   // ===== GET /mobile-redirect — Intermediate page for mobile deep link =====
   router.get('/mobile-redirect', async (req: Request, res: Response) => {
