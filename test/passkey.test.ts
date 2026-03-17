@@ -240,7 +240,7 @@ describe('POST /auth/passkey/data', () => {
         credentialId: 'cred-1',
         timestamp: nowMicros,
       },
-      { 'x-signature': 'bb'.repeat(57) },
+      { 'x-signature': 'cc'.repeat(57) },
     );
     expect(res.status).toBe(400);
     expect(res.body.details).toContain('Short-form ICAN');

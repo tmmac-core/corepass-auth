@@ -8,8 +8,10 @@ import type { SessionStore, StoreEntry } from '../types.js';
 export class MemoryStore implements SessionStore {
   private store = new Map<string, StoreEntry>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private maxEntries: number;
 
-  constructor(cleanupIntervalMs = 60_000) {
+  constructor(cleanupIntervalMs = 60_000, maxEntries = 50_000) {
+    this.maxEntries = maxEntries;
     this.cleanupTimer = setInterval(() => this.cleanup(), cleanupIntervalMs);
     // Don't keep the process alive just for cleanup
     if (this.cleanupTimer.unref) {
@@ -18,6 +20,13 @@ export class MemoryStore implements SessionStore {
   }
 
   async set(key: string, value: StoreEntry, ttlMs: number): Promise<void> {
+    // Prevent unbounded growth (DoS protection)
+    if (this.store.size >= this.maxEntries && !this.store.has(key)) {
+      await this.cleanup();
+      if (this.store.size >= this.maxEntries) {
+        throw new Error('Store capacity exceeded');
+      }
+    }
     this.store.set(key, {
       ...value,
       expiresAt: Date.now() + ttlMs,

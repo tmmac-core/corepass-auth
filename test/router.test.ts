@@ -265,7 +265,7 @@ describe('Router Endpoints', () => {
         coreID: TEST_ICAN,
       });
       expect(res.status).toBe(403);
-      expect(res.body.error).toBe('Custom rejection');
+      expect(res.body.error).toBe('Authentication rejected');
       hookApp.auth.destroy();
     });
 

@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { ResolvedConfig, ChallengeData, PasskeyData, CallbackPayload } from './types.js';
+import type { AuditEvent } from './types.js';
 import { createChallenge, getChallenge, updateChallenge, deleteChallenge } from './challenge.js';
-import { createSession } from './session.js';
+import { createSession, getSession, extractToken, destroySession } from './session.js';
 import { normalizeIcan, isIcanAllowed, getIcanName } from './crypto/ican.js';
 import { verifyEd448Signature } from './crypto/ed448.js';
+import { verifyPasskeyData } from './crypto/passkey.js';
 import { getMobileRedirectHtml } from './widget/mobile.js';
 
 /**
@@ -27,6 +29,28 @@ function getClientIp(headers: Record<string, string | string[] | undefined>): st
   const realIp = headers['x-real-ip'];
   if (typeof realIp === 'string') return realIp;
   return '';
+}
+
+/** Build audit base fields from a request */
+function buildAuditBase(req: Request): Omit<AuditEvent, 'type' | 'userId'> {
+  return {
+    ip: getClientIp(req.headers),
+    userAgent: String(req.headers['user-agent'] || ''),
+    timestamp: new Date(),
+  };
+}
+
+/** Log an audit event if a logger is configured */
+async function auditLog(
+  config: ResolvedConfig,
+  base: Omit<AuditEvent, 'type' | 'userId'>,
+  type: AuditEvent['type'],
+  userId: string,
+  reason?: string,
+): Promise<void> {
+  if (config.auditLogger) {
+    await config.auditLogger.log({ ...base, type, userId, reason });
+  }
 }
 
 /** Build the widget JS bundle (loaded lazily) */
@@ -78,11 +102,7 @@ export function createRouter(config: ResolvedConfig): Router {
     }
 
     const ican = normalizeIcan(coreID);
-    const auditBase = {
-      ip: getClientIp(req.headers),
-      userAgent: String(req.headers['user-agent'] || ''),
-      timestamp: new Date(),
-    };
+    const audit = buildAuditBase(req);
 
     // Whitelist check
     if (!isIcanAllowed(ican, config.allowedIcans)) {
@@ -90,9 +110,7 @@ export function createRouter(config: ResolvedConfig): Router {
       challenge.status = 'rejected';
       challenge.reason = 'ICAN not whitelisted';
       await updateChallenge(config, sessionId, challenge);
-      if (config.auditLogger) {
-        await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason: 'ICAN not whitelisted' });
-      }
+      await auditLog(config, audit, 'login_rejected', ican, 'ICAN not whitelisted');
       return res.status(403).json({ error: 'ICAN nicht autorisiert' });
     }
 
@@ -107,9 +125,7 @@ export function createRouter(config: ResolvedConfig): Router {
         challenge.status = 'rejected';
         challenge.reason = 'Invalid signature';
         await updateChallenge(config, sessionId, challenge);
-        if (config.auditLogger) {
-          await config.auditLogger.log({ ...auditBase, type: 'login_failure', userId: ican, reason: 'Invalid signature' });
-        }
+        await auditLog(config, audit, 'login_failure', ican, 'Invalid signature');
         return res.status(403).json({ error: 'Signatur ungueltig' });
       }
     }
@@ -124,10 +140,9 @@ export function createRouter(config: ResolvedConfig): Router {
         challenge.status = 'rejected';
         challenge.reason = reason;
         await updateChallenge(config, sessionId, challenge);
-        if (config.auditLogger) {
-          await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason });
-        }
-        return res.status(403).json({ error: reason });
+        await auditLog(config, audit, 'login_rejected', ican, reason);
+        // Don't leak internal hook error details to the client
+        return res.status(403).json({ error: 'Authentication rejected' });
       }
     }
 
@@ -142,18 +157,13 @@ export function createRouter(config: ResolvedConfig): Router {
     await updateChallenge(config, sessionId, challenge);
 
     console.log(`[CorePassAuth] Authenticated: ${name} (${ican})`);
-    if (config.auditLogger) {
-      await config.auditLogger.log({ ...auditBase, type: 'login_success', userId: ican });
-    }
+    await auditLog(config, audit, 'login_success', ican);
     res.json({ status: 'ok', ican, name });
   });
 
   // ===== GET /app-link — CorePass mobile redirect callback =====
   router.get('/app-link', async (req: Request, res: Response) => {
-    // Normalize query param names (session/sessionId, coreID/coreId)
-    const sessionId = String(req.query.session || req.query.sessionId || '');
-    const coreID = String(req.query.coreID || req.query.coreId || '');
-    const signature = (req.query.signature) ? String(req.query.signature) : undefined;
+    const { sessionId, coreId: coreID, signature } = normalizePayload(req.query as Record<string, unknown>);
 
     if (!sessionId || !coreID) {
       return res.redirect('/?error=missing_params');
@@ -169,18 +179,12 @@ export function createRouter(config: ResolvedConfig): Router {
     }
 
     const ican = normalizeIcan(coreID);
-    const auditBase = {
-      ip: getClientIp(req.headers),
-      userAgent: String(req.headers['user-agent'] || ''),
-      timestamp: new Date(),
-    };
+    const audit = buildAuditBase(req);
 
     if (!isIcanAllowed(ican, config.allowedIcans)) {
       console.log(`[CorePassAuth] app-link: ICAN not whitelisted: ${ican}`);
       await deleteChallenge(config, sessionId);
-      if (config.auditLogger) {
-        await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason: 'ICAN not whitelisted (app-link)' });
-      }
+      await auditLog(config, audit, 'login_rejected', ican, 'ICAN not whitelisted (app-link)');
       return res.redirect('/?error=not_whitelisted');
     }
 
@@ -192,9 +196,7 @@ export function createRouter(config: ResolvedConfig): Router {
       });
       if (!valid) {
         await deleteChallenge(config, sessionId);
-        if (config.auditLogger) {
-          await config.auditLogger.log({ ...auditBase, type: 'login_failure', userId: ican, reason: 'Invalid signature (app-link)' });
-        }
+        await auditLog(config, audit, 'login_failure', ican, 'Invalid signature (app-link)');
         return res.redirect('/?error=invalid_signature');
       }
     }
@@ -207,9 +209,7 @@ export function createRouter(config: ResolvedConfig): Router {
         const reason = err instanceof Error ? err.message : 'Pre-auth hook rejected';
         console.log(`[CorePassAuth] app-link: Pre-auth hook rejected: ${reason}`);
         await deleteChallenge(config, sessionId);
-        if (config.auditLogger) {
-          await config.auditLogger.log({ ...auditBase, type: 'login_rejected', userId: ican, reason });
-        }
+        await auditLog(config, audit, 'login_rejected', ican, reason);
         return res.redirect(`/?error=rejected`);
       }
     }
@@ -220,9 +220,7 @@ export function createRouter(config: ResolvedConfig): Router {
 
     const name = encodeURIComponent(appSession.name);
     console.log(`[CorePassAuth] app-link: Authenticated: ${appSession.name} (${ican})`);
-    if (config.auditLogger) {
-      await config.auditLogger.log({ ...auditBase, type: 'login_success', userId: ican });
-    }
+    await auditLog(config, audit, 'login_success', ican);
     res.redirect(`/?token=${appSession.id}&name=${name}`);
   });
 
@@ -257,15 +255,13 @@ export function createRouter(config: ResolvedConfig): Router {
 
   // ===== GET /session — Check current session =====
   router.get('/session', async (req: Request, res: Response) => {
-    const { getSession: getSessionFromReq } = await import('./session.js');
-    const { extractToken } = await import('./session.js');
     const token = extractToken(req);
 
     if (!token) {
       return res.json({ authenticated: false });
     }
 
-    const session = await getSessionFromReq(config, token);
+    const session = await getSession(config, token);
     if (!session) {
       return res.json({ authenticated: false });
     }
@@ -279,8 +275,6 @@ export function createRouter(config: ResolvedConfig): Router {
 
   // ===== POST /logout — Destroy session =====
   router.post('/logout', async (req: Request, res: Response) => {
-    const { destroySession } = await import('./session.js');
-    const { extractToken } = await import('./session.js');
     const token = extractToken(req);
 
     if (token) {
@@ -323,7 +317,6 @@ export function createRouter(config: ResolvedConfig): Router {
           });
         }
 
-        const { verifyPasskeyData } = await import('./crypto/passkey.js');
         await verifyPasskeyData(body, signature, req.headers, config.passkey);
 
         console.log(`[CorePassAuth] Passkey verified: ${body.coreId}`);

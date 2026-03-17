@@ -8,8 +8,30 @@
  * Timestamp is in microseconds (Unix epoch), validated against a configurable window.
  */
 
+import crypto from 'crypto';
 import type { PasskeyData, ResolvedPasskeyConfig } from '../types.js';
 import { getEd448, canonicalJson, extractPublicKeyFromHeader, hexToBytes } from './ed448.js';
+
+// Replay protection: track used signature hashes so the same signed payload
+// cannot be submitted twice within the timestamp window.
+const usedSignatures = new Map<string, number>(); // hash → expiresAt
+
+function checkReplay(signatureHex: string, windowMs: number): void {
+  const hash = crypto.createHash('sha256').update(signatureHex).digest('hex');
+  const now = Date.now();
+
+  // Cleanup expired entries (piggyback on each call — lightweight)
+  if (usedSignatures.size > 1000) {
+    for (const [k, exp] of usedSignatures) {
+      if (now > exp) usedSignatures.delete(k);
+    }
+  }
+
+  if (usedSignatures.has(hash)) {
+    throw new Error('Signature already used (replay detected)');
+  }
+  usedSignatures.set(hash, now + windowMs);
+}
 
 /**
  * Verify a signed passkey data payload from CorePass.
@@ -48,23 +70,32 @@ export async function verifyPasskeyData(
     throw new Error('Invalid timestamp format');
   }
 
-  const diff = nowMicros > tsMicros ? nowMicros - tsMicros : tsMicros - nowMicros;
+  // Only accept timestamps in the past (with small leeway for clock skew).
+  // Why no future timestamps? An attacker could pre-generate signed payloads
+  // with future timestamps and replay them later within the window.
+  const clockSkewMicros = 30n * 1_000_000n; // 30 seconds leeway for clock differences
+  if (tsMicros > nowMicros + clockSkewMicros) {
+    throw new Error('Timestamp is in the future');
+  }
   const windowMicros = BigInt(config.timestampWindowMs) * 1000n;
-  if (diff > windowMicros) {
+  if (nowMicros - tsMicros > windowMicros) {
     throw new Error('Timestamp out of range');
   }
 
-  // 3. Extract public key (from X-Public-Key header or long-form ICAN)
+  // 3. Replay protection — reject signatures that have already been used
+  checkReplay(signatureHex, config.timestampWindowMs);
+
+  // 4. Extract public key (from X-Public-Key header or long-form ICAN)
   const publicKey = extractPublicKeyFromHeader(headers, coreId);
 
-  // 4. Build canonical signature input
+  // 5. Build canonical signature input
   //    Format: POST\n{endpoint path}\n{canonical JSON of body fields}
   //    Why this format? It binds the signature to the HTTP method + path,
   //    preventing replay attacks across different endpoints.
   const canonicalBody = canonicalJson({ coreId, credentialId, timestamp, userData });
   const signatureInput = `POST\n${config.path}\n${canonicalBody}`;
 
-  // 5. Verify Ed448 signature
+  // 6. Verify Ed448 signature
   const curve = await getEd448();
   const msg = new TextEncoder().encode(signatureInput);
   const sigBytes = hexToBytes(signatureHex);
