@@ -117,7 +117,7 @@ export function createRouter(config: ResolvedConfig): Router {
     // Optional pre-authentication hook — allows custom validation before accepting
     if (config.onBeforeAuthenticate) {
       try {
-        await config.onBeforeAuthenticate({ sessionId, coreId: coreID, signature }, challenge);
+        await config.onBeforeAuthenticate({ sessionId, coreId: coreID, signature }, { ...challenge });
       } catch (err) {
         const reason = err instanceof Error ? err.message : 'Pre-auth hook rejected';
         console.log(`[CorePassAuth] Pre-auth hook rejected: ${reason}`);
@@ -202,7 +202,7 @@ export function createRouter(config: ResolvedConfig): Router {
     // Optional pre-authentication hook
     if (config.onBeforeAuthenticate) {
       try {
-        await config.onBeforeAuthenticate({ sessionId, coreId: coreID, signature }, challenge);
+        await config.onBeforeAuthenticate({ sessionId, coreId: coreID, signature }, { ...challenge });
       } catch (err) {
         const reason = err instanceof Error ? err.message : 'Pre-auth hook rejected';
         console.log(`[CorePassAuth] app-link: Pre-auth hook rejected: ${reason}`);
