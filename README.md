@@ -342,6 +342,12 @@ src/
     └── styles.ts         # Widget CSS
 ```
 
+## Disclaimer
+
+This software is provided **"as is"**, without warranty of any kind. Use it at your own risk. The authors and contributors accept no responsibility or liability for any damage, data loss, security breaches, or financial losses arising from the use of this software. You are solely responsible for evaluating the suitability of this module for your use case and for securing your own deployment.
+
+**This is not a certified security product.** If your application handles sensitive data or financial transactions, you should conduct your own independent security audit before deploying to production.
+
 ## License
 
 MIT
