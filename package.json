@@ -1,6 +1,6 @@
 {
   "name": "@tmmac/corepass-auth",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Reusable CorePass authentication middleware for Express.js — QR + Mobile Deep Link",
   "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
